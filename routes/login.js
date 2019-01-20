@@ -1,11 +1,21 @@
 var express = require('express');
 var router = express.Router();
 var url = require('url');
-var hydra = require('../services/hydra')
+var hydra = require('../services/hydra');
+var CrowdClient = require('atlassian-crowd-client');
 
 // Sets up csrf protection
 var csrf = require('csurf');
 var csrfProtection = csrf({ cookie: true });
+
+// Set up Crowd client
+var crowd = new CrowdClient({
+  baseUrl: 'https://crowd.ruhmesmeile.tools/crowd/',
+  application: {
+    name: 'Nextcloud',
+    password: 'ZKN7KYt,ZAsj'
+  }
+});
 
 router.get('/', csrfProtection, function (req, res, next) {
   // Parses the URL query
@@ -82,8 +92,16 @@ router.post('/', csrfProtection, function (req, res, next) {
     // acr: '0',
   })
     .then(function (response) {
-      // All we need to do now is to redirect the user back to hydra!
-      res.redirect(response.redirect_to);
+      // Authenticate to Crowd:
+      return crowd.session.create('user', 'password').then(function (session) {
+        // Fetch the user profile:
+        return crowd.session.getUser(session.token).then(function (user) {
+          console.log('Hello, ' + user.displayname);
+
+          // All we need to do now is to redirect the user back to hydra!
+          res.redirect(response.redirect_to);
+        });
+      });
     })
     // This will handle any error that happens when making HTTP calls to hydra
     .catch(function (error) {

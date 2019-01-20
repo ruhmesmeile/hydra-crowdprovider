@@ -1,7 +1,7 @@
 var express = require('express');
 var router = express.Router();
 var url = require('url');
-var hydra = require('../services/hydra')
+var hydra = require('../services/hydra');
 
 // Sets up csrf protection
 var csrf = require('csurf');
