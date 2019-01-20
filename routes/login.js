@@ -12,8 +12,8 @@ var csrfProtection = csrf({ cookie: true });
 var crowd = new CrowdClient({
   baseUrl: 'https://crowd.ruhmesmeile.tools/crowd/',
   application: {
-    name: 'Nextcloud',
-    password: 'ZKN7KYt,ZAsj'
+    name: 'application',
+    password: 'password'
   }
 });
 
