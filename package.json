@@ -1,6 +1,6 @@
 {
   "name": "hydra-crowdprovider",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Hydra login-consent-provider for Atlassian Crowd",
   "author": "Jonas Ulrich <jonas.ulrich@ruhmesmeile.com>",
   "scripts": {
