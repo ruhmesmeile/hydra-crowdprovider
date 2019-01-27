@@ -1,0 +1,4 @@
+CREATE USER crowddb;
+CREATE DATABASE crowddb;
+GRANT ALL PRIVILEGES ON DATABASE crowddb TO crowddb;
+ALTER USER crowddb PASSWORD 'betatester';
