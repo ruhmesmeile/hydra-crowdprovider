@@ -61,4 +61,4 @@ typings/
 .idea
 
 # Ignore certs
-certs/*
+resources/certs/*
