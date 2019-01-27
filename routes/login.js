@@ -8,12 +8,17 @@ var CrowdClient = require('atlassian-crowd-client');
 var csrf = require('csurf');
 var csrfProtection = csrf({ cookie: true });
 
+// Load credentials
+const crowdBaseUrl = process.env.CROWD_BASEURL;
+const crowdApplication = process.env.CROWD_APPLICATION;
+const crowdPassword = process.env.CROWD_PASSWORD;
+
 // Set up Crowd client
 var crowd = new CrowdClient({
-  baseUrl: 'https://crowd.ruhmesmeile.tools/crowd/',
+  baseUrl: crowdBaseUrl,
   application: {
-    name: 'application',
-    password: 'password'
+    name: crowdApplication,
+    password: crowdPassword
   }
 });
 
@@ -44,11 +49,47 @@ router.get('/', csrfProtection, function (req, res, next) {
         });
       }
 
-      // If authentication can't be skipped we MUST show the login UI.
-      res.render('login', {
-        csrfToken: req.csrfToken(),
-        challenge: challenge,
-      });
+      if (req.cookies['crowd.token_key']) {
+        return crowd.session.getUser(req.cookies['crowd.token_key']).then(function (user) {
+          // Seems like the user authenticated! Let's tell hydra...
+          return hydra.acceptLoginRequest(challenge, {
+            // Subject is an alias for user ID. A subject can be a random string, a UUID, an email address, ....
+            subject: user.username,
+
+            // This tells hydra to remember the browser and automatically authenticate the user in future requests. This will
+            // set the "skip" parameter in the other route to true on subsequent requests!
+            remember: Boolean(req.body.remember),
+
+            // When the session expires, in seconds. Set this to 0 so it will never expire.
+            remember_for: 3600,
+
+            // Sets which "level" (e.g. 2-factor authentication) of authentication the user has. The value is really arbitrary
+            // and optional. In the context of OpenID Connect, a value of 0 indicates the lowest authorization level.
+            // acr: '0',
+          })
+          .then(function (response) {
+            // All we need to do now is to redirect the user back to hydra!
+            res.redirect(response.redirect_to);
+          })
+          // This will handle any error that happens when making HTTP calls to hydra
+          .catch(function (error) {
+            next(error);
+          });
+        })
+        .catch(function () {
+          // If authentication can't be skipped we MUST show the login UI.
+          res.render('login', {
+            csrfToken: req.csrfToken(),
+            challenge: challenge,
+          });
+        });
+      } else {
+        // If authentication can't be skipped we MUST show the login UI.
+        res.render('login', {
+          csrfToken: req.csrfToken(),
+          challenge: challenge,
+        });
+      }
     })
     // This will handle any error that happens when making HTTP calls to hydra
     .catch(function (error) {
@@ -60,67 +101,54 @@ router.post('/', csrfProtection, function (req, res, next) {
   // The challenge is now a hidden input field, so let's take it from the request body instead
   var challenge = req.body.challenge;
 
-  // Let's check if the user provided valid credentials. Of course, you'd use a database or some third-party service
-  // for this!
-  if (!(req.body.email === 'foo@bar.com' && req.body.password === 'foobar')) {
-    // Looks like the user provided invalid credentials, let's show the ui again...
+  // Authenticate to Crowd:
+  return crowd.session.create(req.body.username, req.body.password).then(function (session) {
+    // Fetch the user profile:
+    return crowd.session.getUser(session.token).then(function (user) {
+      // Seems like the user authenticated! Let's tell hydra...
+      return hydra.acceptLoginRequest(challenge, {
+        // Subject is an alias for user ID. A subject can be a random string, a UUID, an email address, ....
+        subject: user.username,
 
+        // This tells hydra to remember the browser and automatically authenticate the user in future requests. This will
+        // set the "skip" parameter in the other route to true on subsequent requests!
+        remember: Boolean(req.body.remember),
+
+        // When the session expires, in seconds. Set this to 0 so it will never expire.
+        remember_for: 3600,
+
+        // Sets which "level" (e.g. 2-factor authentication) of authentication the user has. The value is really arbitrary
+        // and optional. In the context of OpenID Connect, a value of 0 indicates the lowest authorization level.
+        // acr: '0',
+      })
+      .then(function (response) {
+        // TODO: use better / more logical 'maxAge'
+        res.cookie('crowd.token_key', session.token, {
+          maxAge: 240000,
+          path: '/',
+          secure: false,
+          httpOnly: true,
+          domain: '.ruhmesmeile.machine',
+          encode: String
+        });
+
+        // All we need to do now is to redirect the user back to hydra!
+        res.redirect(response.redirect_to);
+      })
+      // This will handle any error that happens when making HTTP calls to hydra
+      .catch(function (error) {
+        next(error);
+      });
+    });
+  })
+  .catch(function () {
     res.render('login', {
       csrfToken: req.csrfToken(),
-
       challenge: challenge,
-
       error: 'The username / password combination is not correct'
     });
     return;
-  }
-
-  // Seems like the user authenticated! Let's tell hydra...
-  hydra.acceptLoginRequest(challenge, {
-    // Subject is an alias for user ID. A subject can be a random string, a UUID, an email address, ....
-    subject: 'foo@bar.com',
-
-    // This tells hydra to remember the browser and automatically authenticate the user in future requests. This will
-    // set the "skip" parameter in the other route to true on subsequent requests!
-    remember: Boolean(req.body.remember),
-
-    // When the session expires, in seconds. Set this to 0 so it will never expire.
-    remember_for: 3600,
-
-    // Sets which "level" (e.g. 2-factor authentication) of authentication the user has. The value is really arbitrary
-    // and optional. In the context of OpenID Connect, a value of 0 indicates the lowest authorization level.
-    // acr: '0',
-  })
-    .then(function (response) {
-      // Authenticate to Crowd:
-      return crowd.session.create('user', 'password').then(function (session) {
-        // Fetch the user profile:
-        return crowd.session.getUser(session.token).then(function (user) {
-          console.log('Hello, ' + user.displayname);
-
-          // All we need to do now is to redirect the user back to hydra!
-          res.redirect(response.redirect_to);
-        });
-      });
-    })
-    // This will handle any error that happens when making HTTP calls to hydra
-    .catch(function (error) {
-      next(error);
-    });
-
-  // You could also deny the login request which tells hydra that no one authenticated!
-  // hydra.rejectLoginRequest(challenge, {
-  //   error: 'invalid_request',
-  //   error_description: 'The user did something stupid...'
-  // })
-  //   .then(function (response) {
-  //     // All we need to do now is to redirect the browser back to hydra!
-  //     res.redirect(response.redirect_to);
-  //   })
-  //   // This will handle any error that happens when making HTTP calls to hydra
-  //   .catch(function (error) {
-  //     next(error);
-  //   });
+  });
 });
 
 module.exports = router;

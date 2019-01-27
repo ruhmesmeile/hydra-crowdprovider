@@ -1,0 +1,142 @@
+version: "3"
+services:
+  ########################################################
+  # Hydra logint-consent-flow provider for Atlassian Crowd
+  ########################################################
+  crowdprovider:
+    build: .
+    entrypoint: node --inspect-brk=0.0.0.0 ./bin/www
+    container_name: crowdprovider
+    hostname: crowdprovider
+    networks:
+      - ssoauthnet
+    ports:
+      - "3000:3000"
+      - "9229:9229"
+    env_file:
+      - .env
+    environment:
+      - VIRTUAL_HOST=crowdprovider.ruhmesmeile.machine
+      - VIRTUAL_PORT=3000
+
+  #######################################
+  # Atlassian Crowd
+  #######################################
+  crowd:
+    image: ruhmesmeile/crowd:3.3.3
+    container_name: crowd
+    hostname: crowd
+    links:
+      - postgresql
+    networks:
+      - ssoauthnet
+    volumes:
+      - crowddata:/var/atlassian/crowd
+    ports:
+      - "8095:8095"
+    env_file:
+      - .env
+    environment:
+      - VIRTUAL_HOST=crowd.ruhmesmeile.machine
+      - VIRTUAL_PORT=8095
+
+  #######################################
+  # Ory Hydra
+  #######################################
+  hydra:
+    image: oryd/hydra:v1.0.0-rc.6_oryOS.10
+    command: serve all --dangerous-force-http
+    container_name: hydra
+    hostname: hydra
+    links:
+      - postgresql
+    networks:
+      - ssoauthnet
+    ports:
+      - 4444
+    env_file:
+      - .env
+    environment:
+      - VIRTUAL_HOST=hydra.ruhmesmeile.machine
+      - VIRTUAL_PORT=4444
+
+  socat:
+    image: alpine/socat:1.0.3
+    command: TCP-LISTEN:4445,fork TCP:hydra:4445
+    container_name: socat
+    hostname: socat
+    networks:
+      - ssoauthnet
+    ports:
+      - 4445
+    depends_on:
+      - hydra
+    environment:
+      - VIRTUAL_HOST=hydraadmin.ruhmesmeile.machine
+      - VIRTUAL_PORT=4445
+
+  #######################################
+  # Nextcloud
+  #######################################
+  nextcloud:
+    image: nextcloud:15.0.2
+    container_name: nextcloud
+    hostname: nextcloud
+    links:
+      - postgresql
+    networks:
+      - ssoauthnet
+    ports:
+      - "8080:80"
+    volumes:
+      - nextclouddata:/var/www/html
+    environment:
+      - VIRTUAL_HOST=nextcloud.ruhmesmeile.machine
+      - VIRTUAL_PORT=80
+      - POSTGRES_DB=nextclouddb
+      - POSTGRES_USER=nextclouddb
+      - POSTGRES_PASSWORD=betatester
+      - POSTGRES_HOST=postgresql
+
+  #######################################
+  # PostgreSQL
+  #######################################
+  postgresql:
+    image: postgres:9.5.15
+    container_name: postgresql
+    hostname: postgresql
+    networks:
+      - ssoauthnet
+    volumes:
+      - postgresqldata:/var/lib/postgresql/data
+      - ./resources/sql:/docker-entrypoint-initdb.d
+    env_file:
+      - .env
+
+  #######################################
+  # Nginx Reverse Proxy
+  #######################################
+  nginx:
+    image: jwilder/nginx-proxy:0.7.0
+    container_name: nginx
+    hostname: nginx
+    networks:
+      - ssoauthnet
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/tmp/docker.sock:ro
+      - ./resources/certs:/etc/nginx/certs
+
+volumes:
+  crowddata:
+    external: false
+  postgresqldata:
+    external: false
+  nextclouddata:
+    external: false
+
+networks:
+  ssoauthnet:
+    driver: bridge

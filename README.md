@@ -1,36 +1,75 @@
 # Hydra login-consent-provider for Atlassian Crowd
 
-Implementation based on https://github.com/ory/hydra-login-consent-node
-Utilizing: https://github.com/ghengeveld/atlassian-crowd-client
+Implementation based on: https://github.com/ory/hydra-login-consent-node  
+Utilizing: https://github.com/ghengeveld/atlassian-crowd-client  
 
-# Local testing
-```
-docker run -it --rm --name login-consent-hydra -p 4444:4444 -p 4445:4445 \
-    -e OAUTH2_SHARE_ERROR_DEBUG=1 \
-    -e LOG_LEVEL=debug \
-    -e OAUTH2_CONSENT_URL=http://localhost:3000/consent \
-    -e OAUTH2_LOGIN_URL=http://localhost:3000/login \
-    -e OAUTH2_ISSUER_URL=http://hydra.machine:4444 \
-    -e DATABASE_URL=memory \
-    oryd/hydra:v1.0.0-rc.6_oryOS.10 serve all \
-    --token-url http://hydra.machine:4444/oauth2/token \
-    --auth-url http://hydra.machine:4444/oauth2/auth \
-    --dangerous-force-http
+## Local testing (using `Makefile`, `.env`, and `docker-compose.yml`)
+* Generate a local copy of `.env-example`, called just `.env`
+* Generate local certificate with `mkcert`, and move them to the `resources/certs/` folder:
+  
+  ```
+  mkcert crowdprovider.ruhmesmeile.machine crowd.ruhmesmeile.machine hydra.ruhmesmeile.machine hydraadmin.ruhmesmeile.machine nextcloud.ruhmesmeile.machine ruhmesmeile.machine localhost 127.0.0.1 ::1
+  mv crowdprovider.ruhmesmeile.machine+8-key.pem resources/certs/ruhmesmeile.machine.key
+  mv crowdprovider.ruhmesmeile.machine+8.pem resources/certs/ruhmesmeile.machine.crt
+  ```
+* You may replace generated secrets (`SYSTEM_SECRET`, `COOKIE_SECRET` in `.env`) by running the following command and using its output instead:
+  ```
+  export LC_CTYPE=C; cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 32 | head -n 1
+  ```
+* Start everything with `make up`
+* Hydrate SQL for Hydra with `make hydrate-sql`
+* Finish Crowd installation by visiting https://crowd.ruhmesmeile.machine/crowd/
+* Add application `nextcloud` in Atlassian Crowd: https://crowd.ruhmesmeile.machine/crowd/console/secure/application/addapplicationdetails.action
+  * Screen 1 (`Details`):
+    * Application type: `Generic Application`
+    * Name: `nextcloud`
+    * Description: `Nextcloud instance`
+    * Password: generate one (or use default `betatester`) and note it down for later
+  * Screen 2 (`Connection`):
+    * URL: `https://cloud.ruhmesmeile.machine`
+    * Remote IP address: resolve the host (Button: `Resolve IP Adress`)
+  * Screen 3 (`Directories`):
+    * Just select the (only) local directory
+  * Screen 4 (`Authorisation`):
+    * Check `Allow all users to authenticate`
+  * Screen 5 (`Confirmation`):
+    * Confirm everything by clicking `Add application`
+* Add Atlassian Crowd dev license (Vault: `Infrastruktur Intern`, Name: `Crowd Dev License`)
+* Add another remote address / hostname for the application (https://crowd.ruhmesmeile.machine/crowd/console/secure/application/viewremoteaddresses.action?ID=622593): `nextcloud`
+* Enter `nextcloud` and password chosen in the previous step into `.env` (of leave as is, if you opted to keep the default password `betatester`)
+* Change Nextcloud `config/config.php`:
+  ```
+  docker exec -ti nextcloud bash
+  apt-get update
+  apt-get install vim
+  vi config/config.php
+  ```
+  add the following entries (add the one on `trusted_domains`):
+  ```
+  [..]
+  'trusted_domains' =>
+  array (
+    0 => 'localhost',
+    1 => 'nextcloud.ruhmesmeile.machine',
+  ),
+  'overwriteprotocol' => 'https',
+  [..]
+  ```
+  for `overwriteprocotol` see: https://github.com/zorn-v/nextcloud-social-login/issues/71#issuecomment-453951819
+* Finish Nextcloud setup at https://nextcloud.ruhmesmeile.machine/ (Administrator login: `infrastructure / betatester`)
+* Add `Social Login` app to Nextcloud (head to: https://nextcloud.ruhmesmeile.machine/settings/apps/social)
+* Add `Custom OpenID Connect` entry: https://nextcloud.ruhmesmeile.machine/settings/admin/sociallogin
+  * Internal name: `crowd`
+  * Title: `Atlassian Crowd`
+  * Authorize url: `https://hydra.ruhmesmeile.machine/oauth2/auth`
+  * Token url: `https://hydra.ruhmesmeile.machine/oauth2/token`
+  * User info URL (optional): `https://hydra.ruhmesmeile.machine/userinfo`
+  * Client Id: `test-client`
+  * Client Secret: `test-secret`
+  * Scope: `openid offline`
+  * Save the configuration (Button: `Save`)
+* Test logins (any combination of Nextcloud and Atlassian Crowd first)
 
-docker run --link login-consent-hydra:hydra oryd/hydra:v1.0.0-rc.6_oryOS.10 clients create \
-    --endpoint http://hydra.machine:4445 \
-    --id test-client \
-    --secret test-secret \
-    --response-types code,id_token \
-    --grant-types refresh_token,authorization_code \
-    --scope openid,offline \
-    --callbacks http://hydra.machine:4446/callback
-
-docker run -p 4446:4446 --link login-consent-hydra:hydra oryd/hydra:v1.0.0-rc.6_oryOS.10 token user \
-    --token-url http://hydra.machine:4444/oauth2/token \
-    --auth-url http://hydra.machine:4444/oauth2/auth \
-    --scope openid,offline \
-    --client-id test-client \
-    --client-secret test-secret \
-    --redirect http://hydra.machine:4446
-```
+## Todo
+* Research which IP has to be entered in Crowd remote IP address for nextcloud application, document here (candidates: Docker Container IP address, hostname, ...)
+* Fix `crowd.token_key` (SSO token) generated by Nextcloud / Hydra Crowdprovider login not being usable by Atlassian Crowd (no automatic login). SSO tokens generated by Atlassian Crowd work on Nextcloud, though
