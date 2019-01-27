@@ -128,7 +128,7 @@ router.post('/', csrfProtection, function (req, res, next) {
           path: '/',
           secure: false,
           httpOnly: true,
-          domain: '.ruhmesmeile.machine',
+          domain: process.env.CROWD_COOKIE_DOMAIN,
           encode: String
         });
 
